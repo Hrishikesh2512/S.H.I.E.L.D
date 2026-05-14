@@ -1,4 +1,5 @@
-# Text-Editor# Simple Text Editor with Undo/Redo
+# S.H.I.E.L.D
+# Simple Text Editor with Undo/Redo
 
 A basic text editor in C with undo/redo features.
 
