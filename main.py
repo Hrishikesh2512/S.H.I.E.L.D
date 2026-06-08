@@ -21,11 +21,11 @@ import os
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QPushButton, QLabel, QFileDialog, QMessageBox,
-    QMenuBar, QAction, QTreeView, QFileSystemModel, QTabWidget,
-    QTabBar, QFrame, QShortcut,
+    QMenuBar, QAction, QTabWidget,
+    QFrame, QShortcut,
 )
 from PyQt5.QtGui import QFont, QColor, QPalette, QKeySequence, QIcon
-from PyQt5.QtCore import Qt, QPoint, QModelIndex, QTimer, QSortFilterProxyModel
+from PyQt5.QtCore import Qt, QPoint, QModelIndex, QTimer
 
 from core.editor import EditorTab
 from core.project import ProjectConfig, load_or_create
@@ -34,25 +34,9 @@ from ui.console import ConsoleWidget
 from ui.statusbar import StatusBar
 from ui.project_dialog import ProjectSettingsDialog
 from ui.ai_panel import AIPanel
+from ui.explorer import ExplorerWidget
 
 
-# ──────────────────────────────────────────────
-# Filtered file system model (respects exclude_dirs)
-# ──────────────────────────────────────────────
-class FilteredFSModel(QSortFilterProxyModel):
-    def __init__(self, exclude=None):
-        super().__init__()
-        self._exclude = set(exclude or [".git", "__pycache__", "node_modules"])
-
-    def set_exclude(self, dirs):
-        self._exclude = set(dirs)
-        self.invalidateFilter()
-
-    def filterAcceptsRow(self, source_row, source_parent):
-        src = self.sourceModel()
-        index = src.index(source_row, 0, source_parent)
-        name  = src.fileName(index)
-        return name not in self._exclude
 
 
 # ──────────────────────────────────────────────
@@ -215,27 +199,11 @@ class ShieldIDE(QWidget):
 
     # ── Explorer ─────────────────────────────────
     def _build_explorer(self):
-        self._fs_model = QFileSystemModel()
-        self._fs_model.setRootPath("")
-
-        self._proxy = FilteredFSModel()
-        self._proxy.setSourceModel(self._fs_model)
-
-        self.tree = QTreeView()
-        self.tree.setModel(self._proxy)
-        for col in (1, 2, 3):
-            self.tree.hideColumn(col)
-        self.tree.setHeaderHidden(True)
-        self.tree.clicked.connect(self._on_tree_clicked)
-        self.tree.setStyleSheet("""
-            QTreeView {
-                background:rgba(0,15,28,160); color:#00ffcc;
-                border:1px solid rgba(0,255,200,50); border-radius:6px;
-            }
-            QTreeView::item:hover { background:rgba(0,255,200,30); }
-            QTreeView::item:selected { background:rgba(0,200,160,60); color:#ffffff; }
-        """)
-        return self.tree
+        self.explorer = ExplorerWidget()
+        self.explorer.file_opened.connect(self._open_file_in_tab)
+        # Keep a .tree alias so toggle_explorer still works
+        self.tree = self.explorer.tree
+        return self.explorer
 
     # ── Center area ──────────────────────────────
     def _build_center(self):
@@ -308,11 +276,9 @@ class ShieldIDE(QWidget):
         self.current_folder = folder
         self.project_config = load_or_create(folder)
 
-        # Update model
-        self._proxy.set_exclude(self.project_config.get("exclude_dirs", []))
-        src_index = self._fs_model.setRootPath(folder)
-        proxy_index = self._proxy.mapFromSource(src_index)
-        self.tree.setRootIndex(proxy_index)
+        # Update explorer
+        self.explorer.set_exclude(self.project_config.get("exclude_dirs", []))
+        self.explorer.set_root(folder)
 
         name = self.project_config.get("name") or os.path.basename(folder)
         self.title_lbl.setText(f"{self.APP_NAME} — {name}")
@@ -432,9 +398,10 @@ class ShieldIDE(QWidget):
     # View actions
     # ═══════════════════════════════════════════
     def toggle_explorer(self):
-        self.tree.setVisible(not self.tree.isVisible())
+        visible = self.explorer.isVisible()
+        self.explorer.setVisible(not visible)
         sizes = self.main_splitter.sizes()
-        if not self.tree.isVisible():
+        if visible:
             self._explorer_last_width = sizes[0]
             self.main_splitter.setSizes([0] + sizes[1:])
         else:
@@ -484,7 +451,7 @@ class ShieldIDE(QWidget):
     def reload_project_config(self):
         if self.project_config:
             self.project_config.load()
-            self._proxy.set_exclude(self.project_config.get("exclude_dirs", []))
+            self.explorer.set_exclude(self.project_config.get("exclude_dirs", []))
             self.statusbar.show_message("Project config reloaded.", "#00ffaa")
 
     # ═══════════════════════════════════════════
@@ -558,12 +525,6 @@ class ShieldIDE(QWidget):
         if editor:
             ln, col = editor.cursor_position()
             self.statusbar.set_cursor(ln, col)
-
-    def _on_tree_clicked(self, proxy_index: QModelIndex):
-        src_index = self._proxy.mapToSource(proxy_index)
-        path = self._fs_model.filePath(src_index)
-        if os.path.isfile(path):
-            self._open_file_in_tab(path)
 
     def _next_tab(self):
         i = self.tabs.currentIndex()
