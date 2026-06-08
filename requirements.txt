@@ -1,0 +1,3 @@
+PyQt5>=5.15
+psutil>=5.9
+anthropic>=0.25  # optional — only needed for AI panel
